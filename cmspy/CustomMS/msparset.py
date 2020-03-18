@@ -9,9 +9,7 @@ __maintainer__ = 'Alan'
 __email__ = 'alan.loh@obspm.fr'
 __status__ = 'Production'
 __all__ = [
-    'MSParset',
-    'makems_kw',
-    'makems_parset'
+    'MSParset'
 ]
 
 
@@ -25,23 +23,28 @@ from os.path import (
 )
 import zipfile
 import numpy as np
+import logging
 import astropy.units as u
 from astropy.time import Time, TimeDelta
 
 from cmspy.Astro import to_skycoord
+from cmspy.AntennaTable import nenufar_antennas
+
+
+log = logging.getLogger(__name__)
 
 
 # ============================================================= #
-# -------------------------- HpxSimu -------------------------- #
+# ------------------------- MSParset -------------------------- #
 # ============================================================= #
 class MSParset(object):
     """
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.msname = 'noname.ms'
         self.savepath = ''
-        self.antennatable = ''
+        self.antennatable = 'nenufar'
         self.ra = 0 * u.deg
         self.dec = 90 * u.deg
         self.f0 = 50 * u.MHz
@@ -50,7 +53,9 @@ class MSParset(object):
         self.nbands = 16
         self.t0 = Time.now()
         self.dt = TimeDelta(1, format='sec')
-        self.nt = 100
+        self.nt = 10
+        
+        self._fill_attr(kwargs)
 
 
     # --------------------------------------------------------- #
@@ -91,10 +96,11 @@ class MSParset(object):
         return self._antennatable
     @antennatable.setter
     def antennatable(self, a):
-        a = abspath(a)
-        if not (isdir(a) or isfile(a)):
-            raise NotADirectoryError(
-                '{} not found'.format(a)
+        if a.lower() == 'nenufar':
+            a = nenufar_antennas
+        else:
+            raise ValueError(
+                'Unexpected antenna distribution'
             )
         self._antennatable = a
         return
@@ -218,32 +224,36 @@ class MSParset(object):
         """
         conform = True
         if self.nf % self.nbands != 0:
-            print(
+            log.warning(
                 'nf must be divisible by nbands'
             )
             conform *= False
         try:
             phase_center = to_skycoord((self.ra, self.dec))
         except ValueError:
-            print(
+            log.warning(
                 'ra and dec are not properly set'
             )
             conform *= False
         if self.antennatable.endswith('.zip'):
             with zipfile.ZipFile(self.antennatable) as zipf:
-
                 zipf.extractall(self.savepath)
             self._anttable = join(
                 self.savepath,
                 basename(self.antennatable).replace('.zip', '')
             )
+            log.info(
+                'Antenna table {} created.'.format(
+                    self._anttable
+                )
+            )
         else:
-            print(
+            log.warning(
                 'antenna table is expected as a zip file'
             )
             conform *= False
         if (len(self.f0) != 1) and (len(self.f0) != self.nbands):
-            print(
+            log.warning(
                 'f0 sould either have a length=1 or =nbands'
             ) 
             conform *= False
@@ -257,6 +267,9 @@ class MSParset(object):
             raise Exception(
                 'Attributes are not properly filled.'
             )
+        log.info(
+            'Parameters conform for empty MS creation'
+        )
         config = {
             'MSName': join(self.savepath, self.msname),
             'VDSPath': self.savepath,
@@ -275,7 +288,7 @@ class MSParset(object):
             'NBands': self.nbands,
             'StartTime': self.t0.isot.replace('T', '/'),
             'StepTime': self.dt.to(u.s).value,
-            'NTimes': self.nt,
+            'NTimes': self.nt
         }
         parsetfile = join(self.savepath, 'makems.cfg')
         parset = open(parsetfile, 'w')
@@ -284,11 +297,20 @@ class MSParset(object):
                 '{} = {}\n'.format(key, config[key])
             )
         parset.close()
+        log.info(
+            'Parset {} written'.format(parsetfile)
+        )
         return
 
 
     # --------------------------------------------------------- #
     # ----------------------- Internal ------------------------ #
-
+    def _fill_attr(self, kwargs):
+        """
+        """
+        for key, val in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, val)
+        return
 # ============================================================= #
 
