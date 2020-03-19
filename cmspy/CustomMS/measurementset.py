@@ -204,6 +204,8 @@ class MeasurementSet(MSParset):
         #                 flux=src['flux'],
         #                 phase_center=self.phase_center
         #             )[..., na]
+        # Reinitialize everything to 0
+        data[...] = np.complex(0)
         for name in sources.keys():
             src = sources[name]
             data += add_src(
