@@ -277,10 +277,10 @@ class MSParset(object):
             'WriteImagerColumns': 'T',
             'WriteAutoCorr': 'T',
             'Declination': '{}rad'.format(
-                self.ra.to(u.rad).value
+                self.dec.to(u.rad).value
             ),
             'RightAscension': '{}rad'.format(
-                self.dec.to(u.rad).value
+                self.ra.to(u.rad).value
             ),
             'StartFreq': [fi.to(u.Hz).value for fi in self.f0],
             'StepFreq': self.df.to(u.Hz).value,

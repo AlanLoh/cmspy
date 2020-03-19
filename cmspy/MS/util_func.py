@@ -13,27 +13,44 @@ __all__ = [
 ]
 
 
-from casacore.tables import table
+from cmspy.Astro import radec2lmn
+
+import numpy as np
+import numba
+
+
+# ============================================================= #
+# ------------------------ compute_ft ------------------------- #
+# ============================================================= #
+@numba.jit(nopython=True, parallel=True,fastmath=True)
+def compute_ft(ul, vm, wn):
+    """
+    """
+    return np.exp(-2.j*np.pi*(ul + vm + wn))
+# ============================================================= #
 
 
 # ============================================================= #
 # -------------------------- add_src -------------------------- #
 # ============================================================= #
-def add_src(msname, ra, dec, flux):
+def add_src(uvw, src_coord, flux, phase_center):
     """
+        :param uvw:
+            UVW coordinates (baselines x time x spw, chans, 3),
+            they should be converted in lambdas.
+        :type uvw:
+            `np.ndarray`
+
+        :returns: vis
+        :rtype: `np.ndarray`
     """
-    # Get visibilities
-    # Get UVW coordinates
-    # Get phase center
-    # Convert src coordinates to (l, m, n)
-    l, m, n = to_lmn(ra, dec, ra_0, dec_0)
-    # Compute the phase
-    ul = u*l[:, na, na, na]
-    vm = v*m[:, na, na, na]
-    nw = (n[:, na, na, na] - 1)*w
-    phase = np.exp(-2.j*np.pi*(ul + vm + nw))
-    # Add that to existing visibilities
-    vis_model += flux * phase[..., na]
-    return
+    l, m, n = radec2lmn(
+        skycoord=src_coord,
+        phase_center=phase_center
+    )
+    ul = uvw[..., 0] * l
+    vm = uvw[..., 1] * m
+    wn = uvw[..., 2] * (n - 1)
+    return flux * compute_ft(ul, vm, wn)
 # ============================================================= #
 

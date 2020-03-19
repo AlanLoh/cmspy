@@ -14,11 +14,14 @@ __all__ = [
 
 
 from cmspy.CustomMS import MSParset
+from cmspy.MS import add_src
+from cmspy.Astro import to_skycoord
 
 from casacore.tables import table
 import os
 from os.path import join
 import numpy as np
+from astropy import constants as const
 import logging
 
 
@@ -36,15 +39,33 @@ class MeasurementSet(MSParset):
         super().__init__(
             **kwargs
         )
-        self.msfile = join(
+
+
+    # --------------------------------------------------------- #
+    # --------------------- Getter/Setter --------------------- #
+    @property
+    def msfile(self):
+        return join(
             self.savepath,
             self.msname
         )
 
 
-    # --------------------------------------------------------- #
-    # --------------------- Getter/Setter --------------------- #
-
+    @property
+    def phase_center(self):
+        ms = table(
+            tablename=join(self.msfile, 'POINTING'),
+            ack=False,
+            readonly=True
+        )
+        center = to_skycoord(
+            np.degrees(ms.getcol('TARGET')[0, 0])
+        )
+        ms.close()
+        del ms
+        return center
+    
+    
 
     # --------------------------------------------------------- #
     # ------------------------ Methods ------------------------ #
@@ -108,30 +129,93 @@ class MeasurementSet(MSParset):
         # I think everything is fine here
         
         # FIELD and POINTING tables
-        # Fine as well        
-        return
-
-
-    def add_data_table(self):
-        """ Add the data related tables, seie opportunity to
-            possibly simulate point sources.
-        """
-        # TIME, DATA_DESC_ID, DATA
         ms = table(
-            tablename=join(self.msfile),
+            tablename=join(self.msfile, 'POINTING'),
             ack=False,
             readonly=False
         )
-        uvw = ma.getcol('UVW')
+        tracking = ms.getcol('TRACKING')
+        tracking[...] = True
+        ms.putcol('TRACKING', tracking)
+        ms.flush()
+        ms.close()
+        del tracking, ms
+
+        log.info(
+            'OBSERVATION and POINTING tables updated.'
+        )
+        return
+
+
+    def add_data_table(self, sources):
+        """ Add the data related tables, seize opportunity to
+            possibly simulate point sources.
+
+            :param sources:
+                Dictionnary like 
+                {
+                    'source1': {'ra': 0, 'dec': 0, 'flux': 1},
+                    'source2': {'ra': 0, 'dec': 0, 'flux': 1}
+                }
+            :type sources:
+                `dict`
+        """
+        na = np.newaxis
+        ms = table(
+            tablename=self.msfile,
+            ack=False,
+            readonly=False
+        )
+        # Get data from MS
+        uvw = ms.getcol('UVW')
         data = ms.getcol('DATA')
         time = ms.getcol('TIME')
         desc = ms.getcol('DATA_DESC_ID')
-        for time_stamp in np.unique(time):
-            for spw_stamp in np.unique(desc):
-                selmask = (time == time_stamp)
-                selmask *= (desc == spw_stamp)
-                
-                data[selmask, ...] = ...
+        # Convert UVW in lambdas units
+        msspw = table(
+            tablename=join(self.msfile, 'SPECTRAL_WINDOW'),
+            ack=False,
+            readonly=True
+        )
+        chans = msspw.getcol('CHAN_FREQ')
+        msspw.close()
+        del msspw
+        freq = np.take(
+            chans,
+            np.arange(self.nbands)[desc],
+            axis=0
+        ) # in Hz
+        wavelength = const.c.value / freq
+        uvw_l = uvw[:, na, :] / wavelength[..., na]
+        # Loop over time, spw and sources
+        # for time_stamp in np.unique(time):
+        #     for spw_stamp in np.unique(desc):
+        #         # Build selection mask
+        #         selmask = (time == time_stamp)
+        #         selmask *= (desc == spw_stamp)
+        #         # Reinitialize everything to 0
+        #         data[selmask, ...] = np.complex(0)
+        #         # Construct fake visibilities
+        #         for name in sources.keys():
+        #             src = sources[name]
+        #             data[selmask, ...] += add_src(
+        #                 uvw=uvw_l[selmask, ...],
+        #                 src_coord=(src['ra'], src['dec']),
+        #                 flux=src['flux'],
+        #                 phase_center=self.phase_center
+        #             )[..., na]
+        for name in sources.keys():
+            src = sources[name]
+            data += add_src(
+                uvw=uvw_l,
+                src_coord=(src['ra'], src['dec']),
+                flux=src['flux'],
+                phase_center=self.phase_center
+            )[..., na]
+        ms.putcol('CORRECTED_DATA', data)
+        ms.flush()
+        ms.close()
+        del uvw, time, desc, data, ms
         return
 
 
